@@ -5,17 +5,18 @@ from PIL import Image
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
-
+import time
 import sys
 import os
 import json
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from utils.grad_cam import GradCAM
 import numpy as np
 import cv2
 import io
 from PIL import Image as PILImage
+
+# Add project root to system path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+from utils.grad_cam import GradCAM
 
 # Paths
 MODEL_PATH = "./models/resnet18_neu.pth"
@@ -32,21 +33,28 @@ transform = transforms.Compose([
                          std=[0.229, 0.224, 0.225])
 ])
 
-# Load model once using Streamlit caching
+# Load model once using Streamlit caching and measure load time
 @st.cache_resource
-def load_model():
+def load_model_with_timer():
+    start_time = time.time()
     model = models.resnet18(weights=None)
     model.fc = nn.Linear(model.fc.in_features, len(CLASS_NAMES))
     model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
     model.eval()
-    return model
+    end_time = time.time()
+    load_time = end_time - start_time
+    return model, load_time
 
-model = load_model()
+# Load model
+model, model_load_time = load_model_with_timer()
 
 # Set up Streamlit page
 st.set_page_config(page_title="Surface Defect Detector", layout="centered")
 st.title("🧠 Surface Defect Detection with Grad-CAM")
 st.write("Upload a steel surface image to detect and visualize possible defects.")
+
+# Show model loading time
+st.info(f"⏱️ Model loaded in **{model_load_time:.2f} seconds**")
 
 # =========================
 # 🔍 Upload + Prediction UI
@@ -68,17 +76,21 @@ if uploaded_file is not None:
 
     # Display prediction
     st.success(f"🧠 Predicted Class: **{predicted_class}**")
-    st.info(f"🔎 Confidence: {confidence * 100:.2f}%")
+    st.info(f"🔎 Confidence: **{confidence * 100:.2f}%**")
 
     # Generate Grad-CAM
     gradcam = GradCAM(model, target_layer=model.layer4)
     cam = gradcam.generate(img_tensor, class_idx=predicted.item())
 
-    # Overlay heatmap on image
+    # Prepare visualization
     image_np = np.array(image.resize((224, 224)))
     heatmap = cv2.applyColorMap(np.uint8(255 * cam), cv2.COLORMAP_JET)
     heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB)
-    overlay = cv2.addWeighted(image_np, 0.5, heatmap, 0.5, 0)
+
+    # 🔥 Heatmap Intensity Slider
+    st.subheader("🔥 Adjust Heatmap Intensity")
+    alpha = st.slider("Heatmap Intensity", min_value=0.0, max_value=1.0, value=0.5, step=0.05)
+    overlay = cv2.addWeighted(image_np, 1 - alpha, heatmap, alpha, 0)
 
     # Show Grad-CAM visualization
     st.image(overlay, caption="🔥 Grad-CAM Heatmap", use_container_width=True)
@@ -122,3 +134,30 @@ with st.sidebar:
         st.image(CONF_MATRIX_PATH, caption="Confusion Matrix", use_container_width=True)
     else:
         st.warning("⚠️ Confusion matrix not found. Please train the model.")
+
+
+
+
+
+
+
+
+# =========================
+# 🙋 About the Developer
+# =========================
+st.markdown(
+    """
+    <hr style='border: 1px solid #444;'>
+<br>
+<br>
+<br>
+<br>
+<br>
+    <div style='text-align: left; font-size: 15px; padding: 10px;'>
+        <strong><pre>👨‍💻 Developed by <span style='color:#1f77b4;'>Souvik Dan</span></strong> 
+        📧 <a href='mailto:souvikdan925@gmail.com'>souvikdan925@gmail.com</a>
+        🔗 <a href='https://www.linkedin.com/in/souvik-dan' target='_blank'>LinkedIn Profile</a>
+    </div></pre>
+    """,
+    unsafe_allow_html=True
+)
